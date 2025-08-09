@@ -15,54 +15,41 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      # 1) کامپایل Java و ساخت هدرهای JNI
+      # Compile Java and generate JNI headers
       - name: Compile Java & generate JNI headers
         shell: bash
         run: |
           mkdir -p target/classes cpp_core/include
-          # همهٔ فایل‌های جاوا زیر java_cli/src را کامپایل می‌کنیم و هدر JNI می‌سازیم
           javac -h cpp_core/include -d target/classes $(git ls-files "java_cli/src/**/*.java")
 
-      # 2) پیدا کردن مسیر Visual Studio به شکل مطمئن با vswhere
-      - name: Locate Visual Studio
-        id: vs
-        shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
-            -latest -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-          "VS_PATH=$vs" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      # Use MSVC toolchain explicitly in x64 mode
+      - name: MSVC Dev Cmd (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      # 3) ساخت DLL با MSVC (cl)
-      - name: Build C++ DLL (MSVC)
+      # Build 64-bit DLL
+      - name: Build C++ DLL (x64)
         shell: cmd
-        env:
-          VS_PATH: ${{ steps.vs.outputs.VS_PATH }}
         run: |
-          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat"
           set JH=%JAVA_HOME%
-          rem /I برای include ها؛ /LD برای ساخت DLL
+          rem /LD -> DLL, include paths to JDK headers
           cl /std:c++17 /EHsc ^
              /I"%JH%\include" /I"%JH%\include\win32" /I"cpp_core\include" ^
              /LD cpp_core\src\core.cpp ^
              /link /OUT:cpp_core\libcore.dll
 
-      # 4) پکیج کردن خروجی‌ها
+      # Package outputs
       - name: Package JAR + runner
         shell: pwsh
         run: |
           jar --create --file target/app.jar -C target/classes .
-          # اجرای ساده‌ی برنامه (جاوا JAR + DLL کنار هم)
-          "@echo off`r`njava -Djava.library.path=cpp_core -cp target/app.jar com.example.app.Main`r`n" | `
-            Set-Content -Path run.bat -Encoding ASCII
-          # زیپ خروجی‌ها
+          "@echo off`r`njava -Djava.library.path=cpp_core -cp target/app.jar com.example.app.Main`r`n" | Set-Content -Path run.bat -Encoding ASCII
           Compress-Archive -Path target/app.jar, cpp_core\libcore.dll, run.bat -DestinationPath build-output.zip -Force
 
-      # 5) آپلود آرتیفکت‌ها
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
