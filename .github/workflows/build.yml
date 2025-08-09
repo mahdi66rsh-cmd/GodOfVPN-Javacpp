@@ -1,0 +1,41 @@
+name: Build & Run Java+CPP
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Compile Java & generate JNI headers
+        run: |
+          mkdir -p target/classes cpp_core/include
+          javac -h cpp_core/include -d target/classes $(find java_cli/src -name "*.java")
+
+      - name: Build C++ shared library (libcore.so)
+        run: |
+          mkdir -p target
+          g++ -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" -Icpp_core/include \
+             -fPIC -shared cpp_core/src/core.cpp -o target/libcore.so
+
+      - name: Run Java app (calls C++ via JNI)
+        run: |
+          java -Djava.library.path=target -cp target/classes com.example.app.Main
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            target/**
+            cpp_core/include/**
